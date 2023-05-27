@@ -1,5 +1,5 @@
 import tkinter as tk
-import os
+import os, re, requests, json
 from tkinter import filedialog
 
 class MainGUI:
@@ -19,6 +19,13 @@ class MainGUI:
         self.osuDirButton = tk.Button(self.root, text="Select Your osu! Directory", command=self.selectOsuDir)
         self.osuDirButton.pack()
 
+        self.outputDir = os.getcwd() + '\osuSmartBackup'
+        self.outputDirLabel = tk.Label(self.root, text=self.outputDir)
+        self.outputDirLabel.pack(pady=5)
+
+        self.outputDirButton = tk.Button(self.root, text="Select Your Output Directory", command=self.selectOutputDir)
+        self.outputDirButton.pack()
+
         self.genBackupButton = tk.Button(self.root, text='Generate Backup File', command=self.generateBackup)
         self.genBackupButton.pack()
 
@@ -28,10 +35,50 @@ class MainGUI:
         self.osuDir = filedialog.askdirectory()
         self.curDirLabel.config(text=self.osuDir)
 
-    def generateBackup(self):
+    def selectOutputDir(self) -> None:
+        self.outputDir = filedialog.askdirectory()
+        self.outputDirLabel.config(text=self.outputDir + '/osuSmartBackup')
+
+    def generateBackup(self) -> None:
+        if not os.path.exists(self.osuDir + '/Songs'):
+            print('Songs folder not found, possibly incorrect osu! directory')
+            return
+
         songScan = os.scandir(self.osuDir + '/Songs')
+
+        self.beatmapSetList = set()
+        
+        self.beatmapStatus = dict()
+        
         for song in songScan:
-            if song.is_dir():
-                print(song.name)
+            if not song.is_dir(): continue
+            
+            beatmapId = re.match(r'^\d+', song.name)
+            if not beatmapId:
+                print('FAILED: ' + song.name)
+                self.beatmapStatus[song.name] = {'backedup': False, 'parentSetId': ''}
+                continue
+            beatmapId = beatmapId[0]
+            self.beatmapStatus[str(beatmapId)] = {'backedup': False, 'parentSetId': ''}
+        
+        print(json.dumps(self.beatmapStatus, indent=2))
+        # res = self.getBeatmap(beatmapId)
+        # if res:
+        #     print(res)
+        # else:
+        #    print(f'No mirror on {beatmapId}')
+
+    def getBeatmap(self, beatmapId) -> dict:
+        beatmapURL = f'https://storage.ripple.moe/api/b/{beatmapId}'
+        for _ in range(5):
+            try: 
+                res = requests.get(url = beatmapURL).json()
+                break
+            except requests.exceptions.Timeout:
+                pass
+            except requests.exceptions.RequestException as e:
+                raise SystemExit(e)
+
+        return res
 
 MainGUI()
