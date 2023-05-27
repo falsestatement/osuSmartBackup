@@ -1,6 +1,6 @@
 import tkinter as tk
-import os, re, requests, json
-from tkinter import filedialog
+import os, re, requests, json, pickle
+from tkinter import filedialog, messagebox
 
 class MainGUI:
     def __init__(self) -> None:
@@ -19,12 +19,13 @@ class MainGUI:
         self.osuDirButton = tk.Button(self.root, text="Select Your osu! Directory", command=self.selectOsuDir)
         self.osuDirButton.pack()
 
-        self.outputDir = os.getcwd() + '\osuSmartBackup'
-        self.outputDirLabel = tk.Label(self.root, text=self.outputDir)
-        self.outputDirLabel.pack(pady=5)
+        self.backupDir = os.getcwd()
+        self.backupFile = self.backupDir + '\osuSongs.bak'
+        self.backupDirLabel = tk.Label(self.root, text=self.backupFile)
+        self.backupDirLabel.pack(pady=5)
 
-        self.outputDirButton = tk.Button(self.root, text="Select Your Output Directory", command=self.selectOutputDir)
-        self.outputDirButton.pack()
+        self.backupDirButton = tk.Button(self.root, text="Select Your Output Directory", command=self.selectBackupDir)
+        self.backupDirButton.pack()
 
         self.genBackupButton = tk.Button(self.root, text='Generate Backup File', command=self.generateBackup)
         self.genBackupButton.pack()
@@ -35,32 +36,46 @@ class MainGUI:
         self.osuDir = filedialog.askdirectory()
         self.curDirLabel.config(text=self.osuDir)
 
-    def selectOutputDir(self) -> None:
-        self.outputDir = filedialog.askdirectory()
-        self.outputDirLabel.config(text=self.outputDir + '/osuSmartBackup')
+    def selectBackupDir(self) -> None:
+        self.backupDir = filedialog.askdirectory()
+        self.backupFile = self.backupDir + '/osuSongs.bak'
+        self.backupDirLabel.config(text=self.backupFile)
 
     def generateBackup(self) -> None:
         if not os.path.exists(self.osuDir + '/Songs'):
             print('Songs folder not found, possibly incorrect osu! directory')
             return
 
+        if not os.path.isfile(self.backupFile):
+            backupAlert = messagebox.askyesno(title='No backup file detected', message='No backup file found at the backup location, create a new file?')
+            if not backupAlert:
+                return
+            with open(self.backupFile, 'wb') as outfile:
+                pickle.dump({}, outfile)
+
         songScan = os.scandir(self.osuDir + '/Songs')
 
-        self.beatmapSetList = set()
-        
-        self.beatmapStatus = dict()
+        with open(self.backupFile, 'rb') as infile:
+            self.beatmapStatus = pickle.load(infile)
         
         for song in songScan:
             if not song.is_dir(): continue
             
             beatmapId = re.match(r'^\d+', song.name)
+            
+            if beatmapId and beatmapId[0] in self.beatmapStatus or song.name in self.beatmapStatus:
+                continue
+            
             if not beatmapId:
                 print('FAILED: ' + song.name)
-                self.beatmapStatus[song.name] = {'backedup': False, 'parentSetId': ''}
+                self.beatmapStatus[song.name] = {'reachable': False, 'parentSetId': ''}
                 continue
             beatmapId = beatmapId[0]
-            self.beatmapStatus[str(beatmapId)] = {'backedup': False, 'parentSetId': ''}
+            print('New beatmap entry added')
+            self.beatmapStatus[str(beatmapId)] = {'reachable': True, 'parentSetId': ''}
         
+        with open(self.backupFile, 'wb') as outfile:
+            pickle.dump(self.beatmapStatus, outfile)
         print(json.dumps(self.beatmapStatus, indent=2))
         # res = self.getBeatmap(beatmapId)
         # if res:
