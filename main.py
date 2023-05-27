@@ -7,7 +7,7 @@ class MainGUI:
     def __init__(self) -> None:
         self.root = tk.Tk()
 
-        self.root.geometry("800x500")
+        self.root.geometry("800x600")
         self.root.title("osu! Smart Backup")
 
         self.titleLabel = tk.Label(self.root, text="osu! Smart Backup", font=('Arial', 16))
@@ -30,13 +30,20 @@ class MainGUI:
         self.backupDirButton = tk.Button(self.fileFrame, text="Select Your Output Directory", command=self.selectBackupDir)
         self.backupDirButton.pack()
 
-        self.fileFrame.pack(pady=40)
+        tk.Button(self.fileFrame, text='View currently backed up songs', command=self.viewBackups).pack()
+        self.backupStatusField = tk.Text(self.fileFrame, height=15, width=50)
+        self.backupStatusField.pack()
+
+        self.fileFrame.pack(pady=20)
 
         self.progressBar = Progressbar(self.root, orient='horizontal', length=400, mode='determinate')
         self.progressBar.pack()
 
         self.genBackupButton = tk.Button(self.root, text='Generate Backup File', command=self.generateBackup)
         self.genBackupButton.pack()
+
+        self.downloadButton = tk.Button(self.root, text='Download from backup', command = self.handleDownload)
+        self.downloadButton.pack()
 
         self.root.mainloop()
 
@@ -48,6 +55,15 @@ class MainGUI:
         self.backupDir = filedialog.askdirectory()
         self.backupFile = self.backupDir + '/osuSongs.bak'
         self.backupDirLabel.config(text=self.backupFile)
+
+    def viewBackups(self) -> None:
+        if not os.path.isfile(self.backupFile):
+            messagebox.showerror(title='No backup found', message=f'No backup file found at {self.backupFile}')
+            return
+        with open(self.backupFile, 'rb') as infile:
+            self.beatmapStatus = pickle.load(infile)
+
+        self.backupStatusField.insert('1.0', chars=json.dumps(self.beatmapStatus, indent=2))
 
     def generateBackup(self) -> None:
         if not os.path.exists(self.osuDir + '/Songs'):
@@ -97,11 +113,9 @@ class MainGUI:
                 self.beatmapStatus[beatmap]['parentSetId'] = res['ParentSetID']
             else:
                 print(f'No mirror on {beatmap}')
-            
+            self.updateBeatmapStatus()
             self.progressBar['value'] = ((progress + 1) / numUnprocessedBeatmaps) * 100
             self.root.update_idletasks()
-
-        self.updateBeatmapStatus()
 
     def updateBeatmapStatus(self):
         with open(self.backupFile, 'wb') as outfile:
@@ -117,7 +131,28 @@ class MainGUI:
                 pass
             except requests.exceptions.RequestException as e:
                 raise SystemExit(e)
-
+        else:
+            raise SystemExit('Repeated Timeouts...')
         return res
 
+    def handleDownload(self):
+        beatmapSets = set()
+
+        if not os.path.isfile(self.backupFile):
+            messagebox.showerror(title='No backup found', message=f'No backup file found at {self.backupFile}')
+            return
+        
+        with open(self.backupFile, 'rb') as infile:
+            self.beatmapStatus = pickle.load(infile)
+        
+        for beatmap in self.beatmapStatus:
+            if self.beatmapStatus[beatmap]['parentSetId'] == '':
+                continue
+            beatmapSets.add(self.beatmapStatus[beatmap]['parentSetId'])
+        
+        # for beatmapset in beatmapSets:
+        #     setData = self.getBeatmapSet(beatmapset)
+        #     with open(self.osuDir + f'/Songs/{beatmapset}.osz', 'wb') as downloadFile:
+                
+        #         downloadFile.write(data.content)
 MainGUI()
