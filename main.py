@@ -1,5 +1,7 @@
 import tkinter as tk
-import os, re, requests, json, pickle
+import os, re, requests, json, pickle, time
+import multiprocessing as mp
+from multiprocessing.pool import ThreadPool as tp
 from tkinter import filedialog, messagebox
 from tkinter.ttk import Progressbar
 
@@ -27,7 +29,7 @@ class MainGUI:
         self.backupDirLabel = tk.Label(self.fileFrame, text=self.backupFile)
         self.backupDirLabel.pack(pady=5)
 
-        self.backupDirButton = tk.Button(self.fileFrame, text="Select Your Output Directory", command=self.selectBackupDir)
+        self.backupDirButton = tk.Button(self.fileFrame, text="Select Your Backup Directory", command=self.selectBackupDir)
         self.backupDirButton.pack()
 
         tk.Button(self.fileFrame, text='View currently backed up songs', command=self.viewBackups).pack()
@@ -149,10 +151,29 @@ class MainGUI:
             if self.beatmapStatus[beatmap]['parentSetId'] == '':
                 continue
             beatmapSets.add(self.beatmapStatus[beatmap]['parentSetId'])
-        
+
+        tp(mp.cpu_count()).imap_unordered(self.dummyDownload, [b for b in range(15)])
+
         # for beatmapset in beatmapSets:
         #     setData = self.getBeatmapSet(beatmapset)
         #     with open(self.osuDir + f'/Songs/{beatmapset}.osz', 'wb') as downloadFile:
                 
         #         downloadFile.write(data.content)
-MainGUI()
+
+    def dummyDownload(self, beatmapSets): 
+        tempbar = Progressbar(self.root, length=250, mode='determinate', orient='horizontal')
+        tempbar.pack()
+        self.downloadButton['state'] = 'disabled'
+        
+        for i, _ in enumerate(range(100)):
+            time.sleep(0.02)
+            tempbar['value'] = i + 1
+            self.root.update_idletasks()
+        tempbar.pack_forget()
+
+        self.downloadButton.update()
+        self.downloadButton['state'] = 'normal'
+
+
+if __name__ == "__main__":
+    MainGUI()
