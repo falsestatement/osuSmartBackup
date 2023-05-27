@@ -1,6 +1,7 @@
 import tkinter as tk
 import os, re, requests, json, pickle
 from tkinter import filedialog, messagebox
+from tkinter.ttk import Progressbar
 
 class MainGUI:
     def __init__(self) -> None:
@@ -12,20 +13,27 @@ class MainGUI:
         self.titleLabel = tk.Label(self.root, text="osu! Smart Backup", font=('Arial', 16))
         self.titleLabel.pack(pady=20)
 
+        self.fileFrame = tk.Frame(self.root)
+
         self.osuDir = os.getenv("LOCALAPPDATA") + '\osu!'
-        self.curDirLabel = tk.Label(self.root, text=self.osuDir)
+        self.curDirLabel = tk.Label(self.fileFrame, text=self.osuDir)
         self.curDirLabel.pack()
 
-        self.osuDirButton = tk.Button(self.root, text="Select Your osu! Directory", command=self.selectOsuDir)
+        self.osuDirButton = tk.Button(self.fileFrame, text="Select Your osu! Directory", command=self.selectOsuDir)
         self.osuDirButton.pack()
 
         self.backupDir = os.getcwd()
         self.backupFile = self.backupDir + '\osuSongs.bak'
-        self.backupDirLabel = tk.Label(self.root, text=self.backupFile)
+        self.backupDirLabel = tk.Label(self.fileFrame, text=self.backupFile)
         self.backupDirLabel.pack(pady=5)
 
-        self.backupDirButton = tk.Button(self.root, text="Select Your Output Directory", command=self.selectBackupDir)
+        self.backupDirButton = tk.Button(self.fileFrame, text="Select Your Output Directory", command=self.selectBackupDir)
         self.backupDirButton.pack()
+
+        self.fileFrame.pack(pady=40)
+
+        self.progressBar = Progressbar(self.root, orient='horizontal', length=400, mode='determinate')
+        self.progressBar.pack()
 
         self.genBackupButton = tk.Button(self.root, text='Generate Backup File', command=self.generateBackup)
         self.genBackupButton.pack()
@@ -57,6 +65,7 @@ class MainGUI:
 
         with open(self.backupFile, 'rb') as infile:
             self.beatmapStatus = pickle.load(infile)
+        print(json.dumps(self.beatmapStatus, indent=2))
         
         for song in songScan:
             if not song.is_dir(): continue
@@ -74,14 +83,29 @@ class MainGUI:
             print('New beatmap entry added')
             self.beatmapStatus[str(beatmapId)] = {'reachable': True, 'parentSetId': ''}
         
+        self.updateBeatmapStatus()
+
+        numUnprocessedBeatmaps = len([b for b in self.beatmapStatus if b.isnumeric() and self.beatmapStatus[b]['parentSetId'] == ''])
+
+        for progress, beatmap in enumerate(self.beatmapStatus):
+            if not beatmap.isnumeric() or not self.beatmapStatus[beatmap]['parentSetId'] == '':
+                continue
+            
+            print(f'Fetching data for {beatmap}')
+            res = self.getBeatmap(beatmap)
+            if res:
+                self.beatmapStatus[beatmap]['parentSetId'] = res['ParentSetID']
+            else:
+                print(f'No mirror on {beatmap}')
+            
+            self.progressBar['value'] = ((progress + 1) / numUnprocessedBeatmaps) * 100
+            self.root.update_idletasks()
+
+        self.updateBeatmapStatus()
+
+    def updateBeatmapStatus(self):
         with open(self.backupFile, 'wb') as outfile:
             pickle.dump(self.beatmapStatus, outfile)
-        print(json.dumps(self.beatmapStatus, indent=2))
-        # res = self.getBeatmap(beatmapId)
-        # if res:
-        #     print(res)
-        # else:
-        #    print(f'No mirror on {beatmapId}')
 
     def getBeatmap(self, beatmapId) -> dict:
         beatmapURL = f'https://storage.ripple.moe/api/b/{beatmapId}'
