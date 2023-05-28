@@ -1,5 +1,5 @@
 import tkinter as tk
-import os, re, requests, json, pickle, time
+import os, re, requests, json, pickle, time, threading
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool as tp
 from tkinter import filedialog, messagebox
@@ -152,29 +152,38 @@ class MainGUI:
                 continue
             beatmapSets.add(self.beatmapStatus[beatmap]['parentSetId'])
 
-        self.downloadWithProgress(20125)
+        self.downloadWindow = tk.Toplevel(self.root)
+        self.downloadWindow.title('Downloading...')
+        self.downloadWindow.geometry('500x500')
+        tk.Label(self.downloadWindow, text='Downloading Beatmaps', font=('Arial', 16))
 
-        # tp(mp.cpu_count()).imap_unordered(self.dummyDownload, [b for b in range(15)])
+        # self.downloadWithProgress(20125)
 
-        # for beatmapset in beatmapSets:
-        #     setData = self.getBeatmapSet(beatmapset)
-        #     with open(self.osuDir + f'/Songs/{beatmapset}.osz', 'wb') as downloadFile:
-                
-        #         downloadFile.write(data.content)
+        print(f'CPU Count: {mp.cpu_count()}')
+        def startParallelDownload():
+            pool = tp(mp.cpu_count())
+            pool.imap_unordered(self.dummyDownload, [b for b in range(15)])
+            pool.close()
+            pool.join()
+            self.downloadWindow.destroy()
+        
+        threading.Thread(target=startParallelDownload).start()
 
-    def dummyDownload(self, beatmapSets): 
-        tempbar = Progressbar(self.root, length=250, mode='determinate', orient='horizontal')
+    def dummyDownload(self, beatmapSets):
+        tempbar = Progressbar(self.downloadWindow, length=250, mode='determinate', orient='horizontal')
         tempbar.pack()
         self.downloadButton['state'] = 'disabled'
         
         for i, _ in enumerate(range(100)):
             time.sleep(0.02)
             tempbar['value'] = i + 1
-            self.root.update_idletasks()
+            self.downloadWindow.update_idletasks()
         tempbar.pack_forget()
 
         self.downloadButton.update()
         self.downloadButton['state'] = 'normal'
+
+        return beatmapSets
 
     def downloadWithProgress(self, beatmapSetId):
         downloadProgress = Progressbar(self.root, length=450, mode='determinate', orient='horizontal')
@@ -192,6 +201,9 @@ class MainGUI:
         downloadProgress.pack_forget()
         self.downloadButton.update()
         self.downloadButton['state'] = 'normal'
+    
+    def downloadBeatmapSet(self, beatmapSetId):
+        pass
 
 
 if __name__ == "__main__":
