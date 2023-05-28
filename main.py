@@ -1,9 +1,17 @@
 import tkinter as tk
-import os, re, requests, json, pickle, time, threading
+import os
+import re
+import requests
+import json
+import pickle
+import time
+import threading
+import random
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool as tp
 from tkinter import filedialog, messagebox
 from tkinter.ttk import Progressbar
+
 
 class MainGUI:
     def __init__(self) -> None:
@@ -12,7 +20,8 @@ class MainGUI:
         self.root.geometry("800x600")
         self.root.title("osu! Smart Backup")
 
-        self.titleLabel = tk.Label(self.root, text="osu! Smart Backup", font=('Arial', 16))
+        self.titleLabel = tk.Label(
+            self.root, text="osu! Smart Backup", font=('Arial', 16))
         self.titleLabel.pack(pady=20)
 
         self.fileFrame = tk.Frame(self.root)
@@ -21,7 +30,8 @@ class MainGUI:
         self.curDirLabel = tk.Label(self.fileFrame, text=self.osuDir)
         self.curDirLabel.pack()
 
-        self.osuDirButton = tk.Button(self.fileFrame, text="Select Your osu! Directory", command=self.selectOsuDir)
+        self.osuDirButton = tk.Button(
+            self.fileFrame, text="Select Your osu! Directory", command=self.selectOsuDir)
         self.osuDirButton.pack()
 
         self.backupDir = os.getcwd()
@@ -29,22 +39,27 @@ class MainGUI:
         self.backupDirLabel = tk.Label(self.fileFrame, text=self.backupFile)
         self.backupDirLabel.pack(pady=5)
 
-        self.backupDirButton = tk.Button(self.fileFrame, text="Select Your Backup Directory", command=self.selectBackupDir)
+        self.backupDirButton = tk.Button(
+            self.fileFrame, text="Select Your Backup Directory", command=self.selectBackupDir)
         self.backupDirButton.pack()
 
-        tk.Button(self.fileFrame, text='View currently backed up songs', command=self.viewBackups).pack()
+        tk.Button(self.fileFrame, text='View currently backed up songs',
+                  command=self.viewBackups).pack()
         self.backupStatusField = tk.Text(self.fileFrame, height=15, width=50)
         self.backupStatusField.pack()
 
         self.fileFrame.pack(pady=20)
 
-        self.progressBar = Progressbar(self.root, orient='horizontal', length=400, mode='determinate')
+        self.progressBar = Progressbar(
+            self.root, orient='horizontal', length=400, mode='determinate')
         self.progressBar.pack()
 
-        self.genBackupButton = tk.Button(self.root, text='Generate Backup File', command=self.generateBackup)
+        self.genBackupButton = tk.Button(
+            self.root, text='Generate Backup File', command=self.generateBackup)
         self.genBackupButton.pack()
 
-        self.downloadButton = tk.Button(self.root, text='Download from backup', command = self.handleDownload)
+        self.downloadButton = tk.Button(
+            self.root, text='Download from backup', command=self.handleDownload)
         self.downloadButton.pack()
 
         self.root.mainloop()
@@ -60,12 +75,14 @@ class MainGUI:
 
     def viewBackups(self) -> None:
         if not os.path.isfile(self.backupFile):
-            messagebox.showerror(title='No backup found', message=f'No backup file found at {self.backupFile}')
+            messagebox.showerror(
+                title='No backup found', message=f'No backup file found at {self.backupFile}')
             return
         with open(self.backupFile, 'rb') as infile:
             self.beatmapStatus = pickle.load(infile)
 
-        self.backupStatusField.insert('1.0', chars=json.dumps(self.beatmapStatus, indent=2))
+        self.backupStatusField.insert(
+            '1.0', chars=json.dumps(self.beatmapStatus, indent=2))
 
     def generateBackup(self) -> None:
         if not os.path.exists(self.osuDir + '/Songs'):
@@ -73,7 +90,8 @@ class MainGUI:
             return
 
         if not os.path.isfile(self.backupFile):
-            backupAlert = messagebox.askyesno(title='No backup file detected', message='No backup file found at the backup location, create a new file?')
+            backupAlert = messagebox.askyesno(
+                title='No backup file detected', message='No backup file found at the backup location, create a new file?')
             if not backupAlert:
                 return
             with open(self.backupFile, 'wb') as outfile:
@@ -84,109 +102,126 @@ class MainGUI:
         with open(self.backupFile, 'rb') as infile:
             self.beatmapStatus = pickle.load(infile)
         print(json.dumps(self.beatmapStatus, indent=2))
-        
+
         for song in songScan:
-            if not song.is_dir(): continue
-            
+            if not song.is_dir():
+                continue
+
             beatmapId = re.match(r'^\d+', song.name)
-            
+
             if beatmapId and beatmapId[0] in self.beatmapStatus or song.name in self.beatmapStatus:
                 continue
-            
+
             if not beatmapId:
                 print('FAILED: ' + song.name)
-                self.beatmapStatus[song.name] = {'reachable': False, 'parentSetId': ''}
+                self.beatmapStatus[song.name] = {
+                    'status': 'no_id'}
                 continue
             beatmapId = beatmapId[0]
             print('New beatmap entry added')
-            self.beatmapStatus[str(beatmapId)] = {'reachable': True, 'parentSetId': ''}
-        
+            self.beatmapStatus[str(beatmapId)] = {
+                'status': 'needs_data'}
+
         self.updateBeatmapStatus()
 
-        numUnprocessedBeatmaps = len([b for b in self.beatmapStatus if b.isnumeric() and self.beatmapStatus[b]['parentSetId'] == ''])
+        numUnprocessedBeatmaps = len(
+            [b for b in self.beatmapStatus if self.beatmapStatus[b]['status'] == 'needs_data'])
 
-        for progress, beatmap in enumerate(self.beatmapStatus):
-            if not beatmap.isnumeric() or not self.beatmapStatus[beatmap]['parentSetId'] == '':
-                continue
-            
-            print(f'Fetching data for {beatmap}')
-            res = self.getBeatmap(beatmap)
-            if res:
-                self.beatmapStatus[beatmap]['parentSetId'] = res['ParentSetID']
-            else:
-                print(f'No mirror on {beatmap}')
-            self.updateBeatmapStatus()
-            self.progressBar['value'] = ((progress + 1) / numUnprocessedBeatmaps) * 100
+        def fetchBeatmap():
+            self.progressBar['value'] = 0
             self.root.update_idletasks()
+            for beatmap in self.beatmapStatus:
+                if not self.beatmapStatus[beatmap]['status'] == 'needs_data':
+                    continue
+
+                print(f'Fetching data for {beatmap}')
+                self.getBeatmap(beatmap)
+                self.progressBar['value'] = (
+                    self.progressBar['value'] + (1 / numUnprocessedBeatmaps) * 100)
+                self.root.update_idletasks()
+
+        threading.Thread(target=fetchBeatmap).start()
 
     def updateBeatmapStatus(self):
         with open(self.backupFile, 'wb') as outfile:
             pickle.dump(self.beatmapStatus, outfile)
 
     def getBeatmap(self, beatmapId) -> dict:
-        beatmapURL = f'https://storage.ripple.moe/api/b/{beatmapId}'
+        beatmapURL = f'https://api.chimu.moe/v1/map/{beatmapId}'
         for _ in range(5):
-            try: 
-                res = requests.get(url = beatmapURL).json()
+            try:
+                res = requests.get(url=beatmapURL).json()
+                self.beatmapStatus[beatmapId]['downloadURL'] = f"https://api.chimu.moe{res['DownloadPath']}"
+                self.beatmapStatus[beatmapId]['status'] = 'download_ready'
+                self.updateBeatmapStatus()
                 break
             except requests.exceptions.Timeout:
                 pass
             except requests.exceptions.RequestException as e:
-                raise SystemExit(e)
+                print(f'Error retrieving beatmap information on {beatmapId}')
+                return
+            except KeyError:
+                print(f'Parent Set ID not found for {beatmapId}')
+                return
         else:
             raise SystemExit('Repeated Timeouts...')
-        return res
 
     def handleDownload(self):
-        beatmapSets = set()
+        downloadURLs = set()
 
         if not os.path.isfile(self.backupFile):
-            messagebox.showerror(title='No backup found', message=f'No backup file found at {self.backupFile}')
+            messagebox.showerror(
+                title='No backup found', message=f'No backup file found at {self.backupFile}')
             return
-        
+
         with open(self.backupFile, 'rb') as infile:
             self.beatmapStatus = pickle.load(infile)
-        
+
         for beatmap in self.beatmapStatus:
-            if self.beatmapStatus[beatmap]['parentSetId'] == '':
+            if self.beatmapStatus[beatmap].get('downloadURL') == None:
                 continue
-            beatmapSets.add(self.beatmapStatus[beatmap]['parentSetId'])
+            downloadURLs.add(self.beatmapStatus[beatmap]['downloadURL'])
 
         self.downloadWindow = tk.Toplevel(self.root)
         self.downloadWindow.title('Downloading...')
         self.downloadWindow.geometry('500x500')
-        tk.Label(self.downloadWindow, text='Downloading Beatmaps', font=('Arial', 16))
+        self.downloadWindow.protocol('WM_DELETE_WINDOW', lambda: None)
+        tk.Label(self.downloadWindow,
+                 text='Downloading Beatmaps', font=('Arial', 16))
 
         # self.downloadWithProgress(20125)
 
-        print(f'CPU Count: {mp.cpu_count()}')
         def startParallelDownload():
-            pool = tp(mp.cpu_count())
-            pool.imap_unordered(self.dummyDownload, [b for b in range(15)])
-            pool.close()
-            pool.join()
+            self.downloadButton['state'] = 'disabled'
+            for result in tp(mp.cpu_count()).imap_unordered(self.downloadBeatmapSet, downloadURLs):
+                print(result)
             self.downloadWindow.destroy()
-        
+            self.downloadButton.update()
+            self.downloadButton['state'] = 'normal'
+
         threading.Thread(target=startParallelDownload).start()
 
     def dummyDownload(self, beatmapSets):
-        tempbar = Progressbar(self.downloadWindow, length=250, mode='determinate', orient='horizontal')
+        if random.randint(1, 6) == 1:
+            return 'error occurred lol'
+
+        tempbar = Progressbar(self.downloadWindow, length=250,
+                              mode='determinate', orient='horizontal')
         tempbar.pack()
-        self.downloadButton['state'] = 'disabled'
-        
+
         for i, _ in enumerate(range(100)):
-            time.sleep(0.02)
+            time.sleep(random.randint(1, 10) * 0.01)
             tempbar['value'] = i + 1
             self.downloadWindow.update_idletasks()
         tempbar.pack_forget()
 
         self.downloadButton.update()
-        self.downloadButton['state'] = 'normal'
 
         return beatmapSets
 
     def downloadWithProgress(self, beatmapSetId):
-        downloadProgress = Progressbar(self.root, length=450, mode='determinate', orient='horizontal')
+        downloadProgress = Progressbar(
+            self.root, length=450, mode='determinate', orient='horizontal')
         downloadProgress.pack()
         self.downloadButton['state'] = 'disabled'
 
@@ -201,9 +236,25 @@ class MainGUI:
         downloadProgress.pack_forget()
         self.downloadButton.update()
         self.downloadButton['state'] = 'normal'
-    
+
     def downloadBeatmapSet(self, beatmapSetId):
-        pass
+        downloadFrame = tk.Frame(self.downloadWindow)
+        downloadFrame.pack(pady=10)
+
+        downloadLabel = tk.Label(downloadFrame, text=f'{beatmapSetId}:')
+        downloadLabel.grid(row=0, column=0)
+
+        downloadProgress = Progressbar(
+            downloadFrame, length=350, orient='horizontal', mode='determinate')
+        downloadProgress.grid(row=0, column=1)
+
+        for i, _ in enumerate(range(100)):
+            time.sleep(random.randint(1, 10) * 0.01)
+            downloadProgress['value'] = i + 1
+            self.downloadWindow.update_idletasks()
+        downloadFrame.pack_forget()
+
+        return {beatmapSetId: 'success'}
 
 
 if __name__ == "__main__":
