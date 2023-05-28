@@ -152,7 +152,9 @@ class MainGUI:
                 continue
             beatmapSets.add(self.beatmapStatus[beatmap]['parentSetId'])
 
-        tp(mp.cpu_count()).imap_unordered(self.dummyDownload, [b for b in range(15)])
+        self.downloadWithProgress(20125)
+
+        # tp(mp.cpu_count()).imap_unordered(self.dummyDownload, [b for b in range(15)])
 
         # for beatmapset in beatmapSets:
         #     setData = self.getBeatmapSet(beatmapset)
@@ -171,6 +173,23 @@ class MainGUI:
             self.root.update_idletasks()
         tempbar.pack_forget()
 
+        self.downloadButton.update()
+        self.downloadButton['state'] = 'normal'
+
+    def downloadWithProgress(self, beatmapSetId):
+        downloadProgress = Progressbar(self.root, length=450, mode='determinate', orient='horizontal')
+        downloadProgress.pack()
+        self.downloadButton['state'] = 'disabled'
+
+        with requests.get(f'https://storage.ripple.moe/d/{beatmapSetId}', stream=True) as r:
+            with open(os.path.join(self.backupDir, f'{beatmapSetId}.osz'), 'wb') as downloadfile:
+                totalSize = int(r.headers.get('Content-Length'))
+                for i, data in enumerate(r.iter_content(chunk_size=1024)):
+                    downloadfile.write(data)
+                    downloadProgress['value'] = i * 1024 / totalSize * 100
+                    self.root.update_idletasks()
+
+        downloadProgress.pack_forget()
         self.downloadButton.update()
         self.downloadButton['state'] = 'normal'
 
