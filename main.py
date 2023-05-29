@@ -8,7 +8,8 @@ import time
 import threading
 import random
 import shutil
-import errno
+import ctypes
+import sys
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool as tp
 from tkinter import filedialog, messagebox
@@ -116,8 +117,8 @@ class MainGUI:
 
             if not beatmapId:
                 print('FAILED: ' + song.name)
-                self.beatmapStatus[song.name] = {
-                    'status': 'no_id', 'filePath': os.path.join(self.osuDir.replace('/', '\\'), 'Songs', song.name)}
+                self.saveUnreachable(os.path.join(
+                    self.osuDir.replace('/', '\\'), 'Songs', song.name))
                 continue
             beatmapId = beatmapId[0]
             print('New beatmap entry added')
@@ -148,24 +149,24 @@ class MainGUI:
         with open(self.backupFile, 'wb') as outfile:
             pickle.dump(self.beatmapStatus, outfile)
 
+    def saveUnreachable(self, filePath):
+        fileName = re.search(
+            r'[^\\]+$', filePath)[0]
+        backupPath = os.path.join(self.backupDir.replace(
+            '/', '\\'), 'Nonmirrored_Backup')
+        backupFile = os.path.join(backupPath, fileName)
+
+        if not os.path.exists(backupPath):
+            os.mkdir(backupPath)
+        try:
+            shutil.copytree(
+                filePath, backupFile)
+        except OSError as e:
+            print(e)
+
     def getBeatmap(self, beatmapId) -> dict:
         beatmapURL = f'https://api.chimu.moe/v1/map/{beatmapId}'
         beatmapSetURL = f'https://api.chimu.moe/v1/set/{beatmapId}'
-
-        def saveUnreachable():
-            fileName = re.search(
-                r'[^\\]+$', self.beatmapStatus[beatmapId]['filePath'])[0]
-            backupPath = os.path.join(self.backupDir.replace(
-                '/', '\\'), 'Nonmirrored_Backup')
-            backupFile = os.path.join(backupPath, fileName)
-
-            if not os.path.exists(backupPath):
-                os.mkdir(backupPath)
-            try:
-                shutil.copytree(
-                    self.beatmapStatus[beatmapId]['filePath'], backupFile)
-            except OSError as e:
-                print(e)
 
         for _ in range(5):
             try:
@@ -183,14 +184,14 @@ class MainGUI:
                 continue
             except requests.exceptions.RequestException as e:
                 print(f'Error retrieving beatmap information on {beatmapId}')
-                saveUnreachable()
+                self.saveUnreachable(self.beatmapStatus[beatmapId]['filePath'])
                 return
             except KeyError:
                 print(f'Parent Set ID not found for {beatmapId}')
-                saveUnreachable()
+                self.saveUnreachable(self.beatmapStatus[beatmapId]['filePath'])
                 return
         else:
-            saveUnreachable()
+            self.saveUnreachable(self.beatmapStatus[beatmapId]['filePath'])
             print('Unreachable, retried 5 times')
 
     def handleDownload(self):
@@ -216,11 +217,25 @@ class MainGUI:
         tk.Label(self.downloadWindow,
                  text='Downloading Beatmaps', font=('Arial', 16))
 
+        totalProgressFrame = tk.Frame(self.downloadWindow)
+        totalProgressFrame.pack(pady=5)
+        tk.Label(totalProgressFrame, text='Total Progress').grid(
+            row=0, column=0)
+        totalProgressBar = Progressbar(
+            totalProgressFrame, length=300, orient='horizontal', mode='determinate')
+        totalProgressBar.grid(row=0, column=1, padx=5)
+
         # self.downloadWithProgress(20125)
 
         def startParallelDownload():
             self.downloadButton['state'] = 'disabled'
-            for result in tp(mp.cpu_count()).imap_unordered(self.downloadBeatmapSet, downloadURLs):
+            if not os.path.exists(self.backupDir + '/Beatmap_Downloads'):
+                os.mkdir(self.backupDir + '/Beatmap_Downloads')
+
+            for totalProgress, result in enumerate(tp(mp.cpu_count()).imap_unordered(self.downloadBeatmapSet, downloadURLs), 1):
+                totalProgressBar['value'] = totalProgress * \
+                    100 / len(downloadURLs)
+                totalProgressFrame.update_idletasks()
                 print(result)
             self.downloadWindow.destroy()
             self.downloadButton.update()
@@ -228,61 +243,46 @@ class MainGUI:
 
         threading.Thread(target=startParallelDownload).start()
 
-    def dummyDownload(self, beatmapSets):
-        if random.randint(1, 6) == 1:
-            return 'error occurred lol'
-
-        tempbar = Progressbar(self.downloadWindow, length=250,
-                              mode='determinate', orient='horizontal')
-        tempbar.pack()
-
-        for i, _ in enumerate(range(100)):
-            time.sleep(random.randint(1, 10) * 0.01)
-            tempbar['value'] = i + 1
-            self.downloadWindow.update_idletasks()
-        tempbar.pack_forget()
-
-        self.downloadButton.update()
-
-        return beatmapSets
-
-    def downloadWithProgress(self, beatmapSetId):
-        downloadProgress = Progressbar(
-            self.root, length=450, mode='determinate', orient='horizontal')
-        downloadProgress.pack()
-        self.downloadButton['state'] = 'disabled'
-
-        with requests.get(f'https://storage.ripple.moe/d/{beatmapSetId}', stream=True) as r:
-            with open(os.path.join(self.backupDir, f'{beatmapSetId}.osz'), 'wb') as downloadfile:
-                totalSize = int(r.headers.get('Content-Length'))
-                for i, data in enumerate(r.iter_content(chunk_size=1024)):
-                    downloadfile.write(data)
-                    downloadProgress['value'] = i * 1024 / totalSize * 100
-                    self.root.update_idletasks()
-
-        downloadProgress.pack_forget()
-        self.downloadButton.update()
-        self.downloadButton['state'] = 'normal'
-
-    def downloadBeatmapSet(self, beatmapSetId):
+    def downloadBeatmapSet(self, downloadUrl):
+        fileName = re.search(r"[^/]+$", downloadUrl)[0]
+        
         downloadFrame = tk.Frame(self.downloadWindow)
-        downloadFrame.pack(pady=10)
+        downloadFrame.pack(pady=5)
 
-        downloadLabel = tk.Label(downloadFrame, text=f'{beatmapSetId}:')
+        downloadLabel = tk.Label(downloadFrame, text=f'{downloadUrl}:')
         downloadLabel.grid(row=0, column=0)
 
         downloadProgress = Progressbar(
             downloadFrame, length=350, orient='horizontal', mode='determinate')
         downloadProgress.grid(row=0, column=1)
 
-        for i, _ in enumerate(range(100)):
-            time.sleep(random.randint(1, 10) * 0.01)
-            downloadProgress['value'] = i + 1
-            self.downloadWindow.update_idletasks()
+        try:
+            with requests.get(downloadUrl, stream=True) as r:
+                with open(os.path.join(self.backupDir, f'Beatmap_Downloads/{fileName}.osz'), 'wb') as downloadfile:
+                    totalSize = int(r.headers.get('Content-Length'))
+                    for i, data in enumerate(r.iter_content(chunk_size=1024)):
+                        downloadfile.write(data)
+                        downloadProgress['value'] = i * 1024 / totalSize * 100
+                        downloadFrame.update_idletasks()
+        except Exception as e:
+            print(e)
+            return {downloadUrl: 'failed to download'}
+
         downloadFrame.pack_forget()
 
-        return {beatmapSetId: 'success'}
+        return {downloadUrl: 'success'}
 
 
 if __name__ == "__main__":
-    MainGUI()
+    def is_admin():
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+
+    if is_admin():
+        MainGUI()
+    else:
+        # Re-run the program with admin rights
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, " ".join(sys.argv), None, 1)
