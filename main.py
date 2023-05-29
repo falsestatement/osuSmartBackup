@@ -7,6 +7,8 @@ import pickle
 import time
 import threading
 import random
+import shutil
+import errno
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool as tp
 from tkinter import filedialog, messagebox
@@ -115,32 +117,32 @@ class MainGUI:
             if not beatmapId:
                 print('FAILED: ' + song.name)
                 self.beatmapStatus[song.name] = {
-                    'status': 'no_id'}
+                    'status': 'no_id', 'filePath': os.path.join(self.osuDir.replace('/', '\\'), 'Songs', song.name)}
                 continue
             beatmapId = beatmapId[0]
             print('New beatmap entry added')
             self.beatmapStatus[str(beatmapId)] = {
-                'status': 'needs_data'}
+                'status': 'needs_data', 'filePath': os.path.join(self.osuDir.replace('/', '\\'), 'Songs', song.name)}
 
         self.updateBeatmapStatus()
 
-        numUnprocessedBeatmaps = len(
-            [b for b in self.beatmapStatus if self.beatmapStatus[b]['status'] == 'needs_data'])
-
-        def fetchBeatmap():
+        def fetchBeatmapData():
+            unprocessedBeatmaps = [
+                b for b in self.beatmapStatus if self.beatmapStatus[b]['status'] == 'needs_data']
             self.progressBar['value'] = 0
             self.root.update_idletasks()
-            for beatmap in self.beatmapStatus:
-                if not self.beatmapStatus[beatmap]['status'] == 'needs_data':
-                    continue
 
-                print(f'Fetching data for {beatmap}')
-                self.getBeatmap(beatmap)
-                self.progressBar['value'] = (
-                    self.progressBar['value'] + (1 / numUnprocessedBeatmaps) * 100)
+            def processBeatmap(beatmapId):
+                print(f'Fetching data for {beatmapId}')
+                self.getBeatmap(beatmapId)
+                return beatmapId
+
+            for progress, _ in enumerate(tp(mp.cpu_count()).imap_unordered(processBeatmap, unprocessedBeatmaps), 1):
+                self.progressBar['value'] = progress * \
+                    100 / len(unprocessedBeatmaps)
                 self.root.update_idletasks()
 
-        threading.Thread(target=fetchBeatmap).start()
+        threading.Thread(target=fetchBeatmapData).start()
 
     def updateBeatmapStatus(self):
         with open(self.backupFile, 'wb') as outfile:
@@ -148,23 +150,48 @@ class MainGUI:
 
     def getBeatmap(self, beatmapId) -> dict:
         beatmapURL = f'https://api.chimu.moe/v1/map/{beatmapId}'
+        beatmapSetURL = f'https://api.chimu.moe/v1/set/{beatmapId}'
+
+        def saveUnreachable():
+            fileName = re.search(
+                r'[^\\]+$', self.beatmapStatus[beatmapId]['filePath'])[0]
+            backupPath = os.path.join(self.backupDir.replace(
+                '/', '\\'), 'Nonmirrored_Backup')
+            backupFile = os.path.join(backupPath, fileName)
+
+            if not os.path.exists(backupPath):
+                os.mkdir(backupPath)
+            try:
+                shutil.copytree(
+                    self.beatmapStatus[beatmapId]['filePath'], backupFile)
+            except OSError as e:
+                print(e)
+
         for _ in range(5):
             try:
                 res = requests.get(url=beatmapURL).json()
-                self.beatmapStatus[beatmapId]['downloadURL'] = f"https://api.chimu.moe{res['DownloadPath']}"
+                if res.get('DownloadPath') == None:
+                    res = requests.get(url=beatmapSetURL).json()[
+                        'ChildrenBeatmaps'][0]
+
+                self.beatmapStatus[beatmapId][
+                    'downloadURL'] = f"https://api.chimu.moe{res['DownloadPath']}"
                 self.beatmapStatus[beatmapId]['status'] = 'download_ready'
                 self.updateBeatmapStatus()
-                break
+                return
             except requests.exceptions.Timeout:
-                pass
+                continue
             except requests.exceptions.RequestException as e:
                 print(f'Error retrieving beatmap information on {beatmapId}')
+                saveUnreachable()
                 return
             except KeyError:
                 print(f'Parent Set ID not found for {beatmapId}')
+                saveUnreachable()
                 return
         else:
-            raise SystemExit('Repeated Timeouts...')
+            saveUnreachable()
+            print('Unreachable, retried 5 times')
 
     def handleDownload(self):
         downloadURLs = set()
